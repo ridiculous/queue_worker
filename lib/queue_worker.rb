@@ -144,13 +144,7 @@ class QueueWorker
   end
 
   def client
-    @client ||= begin
-      if self.class.stomp
-        Stomp::Client.new(self.class.stomp)
-      else
-        fail ArgumentError, 'No STOMP config specified'
-      end
-    end
+    @client ||= Stomp::Client.new(self.class.stomp)
   end
 
   def log
