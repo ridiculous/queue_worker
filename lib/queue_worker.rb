@@ -6,7 +6,7 @@ require 'stomp'
 
 class QueueWorker
 
-  VERSION = '0.0.1'
+  VERSION = '1.0.0'
 
   extend Forwardable
 
