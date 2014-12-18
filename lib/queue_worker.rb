@@ -2,17 +2,13 @@ require 'json'
 require 'logger'
 require 'timeout'
 require 'forwardable'
-require 'stomp'
 
 class QueueWorker
-
-  VERSION = '1.0.0'
 
   extend Forwardable
 
   def_delegators :client,
     :ack, :join, :close
-
 
   class << self
     attr_accessor :stomp
