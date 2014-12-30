@@ -23,7 +23,7 @@ class QueueWorker
 
   # @param [String] queue_name the queue to pub/sub
   # @param [#info, #warn, #error] log
-  # @param [Proc] block to handle the subscription callback
+  # @param [Proc] block to process a message received by +subscribe+
   def initialize(queue_name = nil, log = nil, &block)
     @queue = queue_name
     @log = log
@@ -119,13 +119,13 @@ class QueueWorker
   # @param [Stomp::Message] message is the container object Stomp gives us for what is really a "frame" or package from the queue
   def call(message)
     if message.command == 'MESSAGE'
-      handler.call(JSON.parse(message.body, symbolize_names: true), message)
+      handler.call(JSON.parse(message.body, symbolize_names: true))
     end
   rescue => e
     log.error(e.message) { "\n#{e.backtrace.inspect}" }
   ensure
     ack(message)
-    log.info('Processed') { "#{message.headers['message-id']} for #{message.headers['destination']}" }
+    log.info('Processed') { %(#{message.headers['message-id']} from "#{message.headers['destination']}") }
   end
 
   def client
