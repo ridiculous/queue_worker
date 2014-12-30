@@ -30,7 +30,7 @@ class QueueWorker
     @handler = block || proc { |body| Kernel.const_get(body[:class]).call(body[:args]) }
   end
 
-  # = Publish one or more messages to a queue
+  # Publish one or more messages to a queue
   #
   # @param [String] queue name
   # @param [Array] messages a list of objects that are or can be converted to JSON
@@ -40,7 +40,7 @@ class QueueWorker
     worker.close
   end
 
-  # = Peek at any number messages in the queue
+  # Peek at any number messages in the queue
   #
   # @param [String] queue_name
   # @param [Integer] size specify the number of messages to return
@@ -56,6 +56,13 @@ class QueueWorker
     messages
   end
 
+  # Start a subscription worker with the given args
+  def self.subscribe(*args, &block)
+    worker = new(*args, &block)
+    worker.subscribe
+    worker.join
+  end
+
   # = Publish a message to a queue
   #
   # @param [Hash] message - Data to serialize
@@ -67,7 +74,7 @@ class QueueWorker
 
   alias push publish
 
-  # = Subscribe (listen) to a queue
+  # Subscribe (listen) to a queue
   #
   # @param [String] queue_name specify the queue name
   # @param [Integer] size specify the number of messages the block may receive without sending +ack+
@@ -77,7 +84,7 @@ class QueueWorker
     client.subscribe("/queue/#{queue_name || queue}", { :ack => 'client', 'activemq.prefetchSize' => size }, &callback)
   end
 
-  # = Subscribe to a queue for a limited time
+  # Subscribe to a queue for a limited time
   #
   # @param [Integer] duration to subscribe for before closing connection
   # @param [Integer] size specify the number of messages the block may receive without sending +ack+
@@ -91,18 +98,18 @@ class QueueWorker
     quit
   end
 
-  # = Unsubscribe from the current queue
+  # Unsubscribe from the current queue
   def unsubscribe(queue_name = nil)
     client.unsubscribe("/queue/#{queue_name || queue}")
   end
 
-  # = Unsubscribe from the current queue and close the connection
+  # Unsubscribe from the current queue and close the connection
   def quit(queue_name = nil)
     unsubscribe(queue_name)
     close
   end
 
-  # = Handles +subscribe+ callback
+  # Handles +subscribe+ callback
   #
   # Tries to delegate processing of message to a class based on the name of the queue. For example:
   #

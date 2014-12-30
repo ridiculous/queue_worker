@@ -3,6 +3,7 @@ require 'spec_helper'
 describe QueueWorker, slow: true do
   let(:queue_name) { 'queue_foo' }
   let(:log) { Logger.new(STDOUT).tap { |x| x.level = Logger::ERROR } }
+  let(:message) { Struct.new(:command, :body).new('MESSAGE', '{}') }
 
   subject { described_class.new(queue_name, log) }
 
@@ -17,6 +18,17 @@ describe QueueWorker, slow: true do
       expect(worker).to receive(:close)
       expect(worker).to receive(:publish).with(message)
       described_class.publish(queue_name, message)
+    end
+  end
+
+  describe '.subscribe' do
+    let(:handler) { proc {} }
+
+    it 'instantiates and subscribes itself to a given queue' do
+      expect(described_class).to receive(:new).with(queue_name, log, &handler).and_return(subject)
+      expect(subject).to receive(:subscribe)
+      expect(subject).to receive(:join)
+      described_class.subscribe(queue_name, log, &handler)
     end
   end
 
@@ -42,7 +54,6 @@ describe QueueWorker, slow: true do
   describe '#subscribe' do
     let(:size) { 1 }
     let(:headers) { { :ack => 'client', 'activemq.prefetchSize' => size } }
-    let(:message) { Struct.new(:command, :body).new('MESSAGE', '{}') }
 
     it 'pass the -message- to +call+' do
       expect(subject.client).to receive(:subscribe).with("/queue/#{queue_name}", headers).and_yield(message)
