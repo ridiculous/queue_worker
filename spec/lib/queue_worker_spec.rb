@@ -103,7 +103,7 @@ describe QueueWorker, slow: true do
 
     context "when message command is 'MESSAGE'" do
       it 'acknowledges the message and passes it along to the handler' do
-        expect(subject.handler).to receive(:call).with({ class: 'QueueWorker', args: [101] }, message)
+        expect(subject.handler).to receive(:call).with({ class: 'QueueWorker', args: [101] })
         expect(subject).to receive(:ack).with(message)
         subject.call(message)
       end
