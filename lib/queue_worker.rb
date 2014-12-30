@@ -18,15 +18,16 @@ class QueueWorker
     end
   end
 
-  attr_writer :client
+  attr_writer :client, :log
   attr_accessor :queue, :handler
 
   # @param [String] queue_name the queue to pub/sub
-  # @param [Stomp::Client] client that can communicate with ActiveMQ
-  def initialize(queue_name = nil, client = nil)
+  # @param [#info, #warn, #error] log
+  # @param [Proc] block to handle the subscription callback
+  def initialize(queue_name = nil, log = nil, &block)
     @queue = queue_name
-    @client = client
-    @handler = proc { |args, message| load_handler_class(message.headers['destination']).new(args).call }
+    @log = log
+    @handler = block || proc { |body| Kernel.const_get(body[:class]).call(body[:args]) }
   end
 
   # = Publish one or more messages to a queue
@@ -68,11 +69,12 @@ class QueueWorker
 
   # = Subscribe (listen) to a queue
   #
+  # @param [String] queue_name specify the queue name
   # @param [Integer] size specify the number of messages the block may receive without sending +ack+
   # @param [Proc] block to handle the subscribe callback
-  def subscribe(size = 1, &block)
-    callback = block || method(:default_subscribe_callback)
-    client.subscribe("/queue/#{queue}", { :ack => 'client', 'activemq.prefetchSize' => size }, &callback)
+  def subscribe(queue_name = nil, size = 1, &block)
+    callback = block || method(:call)
+    client.subscribe("/queue/#{queue_name || queue}", { :ack => 'client', 'activemq.prefetchSize' => size }, &callback)
   end
 
   # = Subscribe to a queue for a limited time
@@ -82,7 +84,7 @@ class QueueWorker
   # @param [Proc] block to handle the subscribe callback
   def subscribe_with_timeout(duration, size = 1, &block)
     Timeout::timeout(duration) do
-      subscribe(size, &block)
+      subscribe(nil, size, &block)
       join
     end
   rescue Timeout::Error
@@ -90,13 +92,13 @@ class QueueWorker
   end
 
   # = Unsubscribe from the current queue
-  def unsubscribe
-    client.unsubscribe("/queue/#{queue}")
+  def unsubscribe(queue_name = nil)
+    client.unsubscribe("/queue/#{queue_name || queue}")
   end
 
   # = Unsubscribe from the current queue and close the connection
-  def quit
-    unsubscribe
+  def quit(queue_name = nil)
+    unsubscribe(queue_name)
     close
   end
 
@@ -109,34 +111,14 @@ class QueueWorker
   #
   # @param [Stomp::Message] message is the container object Stomp gives us for what is really a "frame" or package from the queue
   def call(message)
-    handler.call(JSON.parse(message.body, symbolize_names: true), message)
+    if message.command == 'MESSAGE'
+      handler.call(JSON.parse(message.body, symbolize_names: true), message)
+    end
   rescue => e
     log.error(e.message) { "\n#{e.backtrace.inspect}" }
   ensure
     ack(message)
-    log.info('Processed') { message }
-  end
-
-  #
-  # Private
-  #
-
-  def default_subscribe_callback(message)
-    if message.command == 'MESSAGE'
-      if message.body == 'UNSUBSCRIBE'
-        unsubscribe
-      else
-        call(message)
-      end
-    end
-  end
-
-  # = Converts the queue name to a constant
-  #
-  # @param [String] destination_queue
-  #
-  def load_handler_class(destination_queue)
-    destination_queue.gsub(%r!^/?queue/!, '').camelize.constantize
+    log.info('Processed') { "#{message.headers['message-id']} for #{message.headers['destination']}" }
   end
 
   def client

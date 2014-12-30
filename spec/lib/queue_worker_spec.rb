@@ -2,8 +2,11 @@ require 'spec_helper'
 
 describe QueueWorker, slow: true do
   let(:queue_name) { 'queue_foo' }
+  let(:log) { Logger.new(STDOUT).tap { |x| x.level = Logger::ERROR } }
 
-  subject { described_class.new(queue_name, double(Stomp::Client)) }
+  subject { described_class.new(queue_name, log) }
+
+  before { allow(subject).to receive(:client).and_return(double(Stomp::Client)) }
 
   describe '.publish' do
     let(:message) { { id: 101 } }
@@ -37,40 +40,42 @@ describe QueueWorker, slow: true do
   end
 
   describe '#subscribe' do
-    let(:headers) { { :ack => 'client', 'activemq.prefetchSize' => 1 } }
+    let(:size) { 1 }
+    let(:headers) { { :ack => 'client', 'activemq.prefetchSize' => size } }
+    let(:message) { Struct.new(:command, :body).new('MESSAGE', '{}') }
 
-    context "when message command is not 'MESSAGE'" do
-      let(:message) { Struct.new(:command).new('PING') }
+    it 'pass the -message- to +call+' do
+      expect(subject.client).to receive(:subscribe).with("/queue/#{queue_name}", headers).and_yield(message)
+      expect(subject).to receive(:call).with(message)
+      subject.subscribe
+    end
 
-      it 'does nothing' do
-        expect(subject.client).to receive(:subscribe).with("/queue/#{queue_name}", headers).and_yield(message)
-        expect(subject).to_not receive(:unsubscribe)
-        expect(subject).to_not receive(:call)
-        subject.subscribe
+    context 'when -queue_name- is given' do
+      it 'subscribes to the specified queue' do
+        expect(subject.client).to receive(:subscribe).with("/queue/test", headers).and_yield(message)
+        expect(subject).to receive(:call).with(message)
+        subject.subscribe('test')
       end
     end
 
-    context "when message command is 'MESSAGE'" do
-      let(:message) { Struct.new(:command, :body).new('MESSAGE', nil) }
+    context 'when -size- is given' do
+      let(:size) { 5 }
 
-      context "when message body is 'UNSUBSCRIBE'" do
-        before { message.body = 'UNSUBSCRIBE' }
-
-        it 'unsubscribes from the -queue-' do
-          expect(subject.client).to receive(:subscribe).with("/queue/#{queue_name}", headers).and_yield(message)
-          expect(subject).to receive(:unsubscribe)
-          subject.subscribe
-        end
+      it 'fetches the specified number of messages' do
+        expect(subject.client).to receive(:subscribe).with("/queue/#{queue_name}", headers).and_yield(message)
+        expect(subject).to receive(:call).with(message)
+        subject.subscribe(nil, size)
       end
+    end
 
-      context "when message body is JSON" do
-        before { message.body = '{}' }
+    context 'when a block is given' do
+      let(:handler_double) { double('Handler block') }
 
-        it 'pass the -message- to +call+' do
-          expect(subject.client).to receive(:subscribe).with("/queue/#{queue_name}", headers).and_yield(message)
-          expect(subject).to receive(:call).with(message)
-          subject.subscribe
-        end
+      it 'yields the given block instead of calling +call+' do
+        expect(subject.client).to receive(:subscribe).with("/queue/#{queue_name}", headers).and_yield(message)
+        expect(handler_double).to receive(:call).with(message)
+        expect(subject).to_not receive(:call)
+        subject.subscribe { |message| handler_double.call(message) }
       end
     end
   end
@@ -83,12 +88,31 @@ describe QueueWorker, slow: true do
   end
 
   describe '#call' do
-    let(:message) { double("Stomp::Message", body: %({"name":"trip_advisor"}), headers: { 'destination' => '/queue/null' }) }
+    let(:message) { double("Stomp::Message", body: %({"class":"QueueWorker", "args": [101]}), command: 'MESSAGE', headers: { 'destination' => '/queue/null' }) }
 
-    it 'acknowledges the message and passes it along to the handler class' do
-      expect(subject.handler).to receive(:call).with({ name: 'trip_advisor' }, message)
-      expect(subject).to receive(:ack).with(message)
-      subject.call(message)
+    context "when message command is 'MESSAGE'" do
+      it 'acknowledges the message and passes it along to the handler' do
+        expect(subject.handler).to receive(:call).with({ class: 'QueueWorker', args: [101] }, message)
+        expect(subject).to receive(:ack).with(message)
+        subject.call(message)
+      end
+    end
+
+    context "when message command is not 'MESSAGE'" do
+      let(:message) { Struct.new(:command).new('PING') }
+
+      it 'does nothing' do
+        expect(subject.handler).to_not receive(:call)
+        expect(subject).to receive(:ack).with(message)
+        subject.call(message)
+      end
+    end
+
+    context 'default handler' do
+      it 'loads the :class and calls it with the message body' do
+        expect(QueueWorker).to receive(:call).with([101])
+        subject.handler.call(JSON.parse(message.body, symbolize_names: true))
+      end
     end
   end
 
